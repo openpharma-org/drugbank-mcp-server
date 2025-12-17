@@ -1,0 +1,207 @@
+name: Update DrugBank Database
+
+on:
+  # Run monthly (DrugBank updates 1-2x per year, but check monthly to catch updates faster)
+  schedule:
+    - cron: '0 0 1 * *'  # First day of every month at midnight UTC
+
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      drugbank_url:
+        description: 'DrugBank XML download URL (optional override)'
+        required: false
+
+jobs:
+  build-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check for new DrugBank release
+        id: check_drugbank
+        run: |
+          # Fetch DrugBank releases page (no auth required)
+          echo "Checking DrugBank releases page..."
+          RELEASES_HTML=$(curl -sL https://go.drugbank.com/releases)
+
+          # Extract latest version number (e.g., "5.1.13")
+          LATEST_VERSION=$(echo "$RELEASES_HTML" | grep -oP 'Version \K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          echo "Latest DrugBank version: $LATEST_VERSION"
+          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+
+          # Check our current version from VERSION file
+          if [ -f "data/VERSION" ]; then
+            CURRENT_VERSION=$(cat data/VERSION | tr -d '[:space:]')
+            echo "Current version: $CURRENT_VERSION"
+          else
+            CURRENT_VERSION="unknown"
+            echo "No VERSION file found - will process"
+          fi
+
+          if [ "$LATEST_VERSION" != "$CURRENT_VERSION" ]; then
+            echo "New DrugBank version detected ($CURRENT_VERSION → $LATEST_VERSION) - will process"
+            echo "should_process=true" >> $GITHUB_OUTPUT
+          else
+            echo "DrugBank version unchanged ($CURRENT_VERSION) - skipping"
+            echo "should_process=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node.js
+        if: steps.check_drugbank.outputs.should_process == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        if: steps.check_drugbank.outputs.should_process == 'true'
+        run: npm ci
+
+      - name: Download DrugBank XML
+        if: steps.check_drugbank.outputs.should_process == 'true'
+        env:
+          DRUGBANK_USERNAME: ${{ secrets.DRUGBANK_USERNAME }}
+          DRUGBANK_PASSWORD: ${{ secrets.DRUGBANK_PASSWORD }}
+          DRUGBANK_URL: ${{ inputs.drugbank_url || 'https://go.drugbank.com/releases/latest/downloads/all-full-database' }}
+        run: |
+          echo "Downloading DrugBank database..."
+
+          # Create data directory
+          mkdir -p data
+
+          # Login and download (requires credentials)
+          curl -Lf -o data/drugbank-full-database.zip \
+            -u "$DRUGBANK_USERNAME:$DRUGBANK_PASSWORD" \
+            "$DRUGBANK_URL"
+
+          # Extract XML into data directory
+          cd data
+          unzip -o drugbank-full-database.zip
+          cd ..
+
+          # Verify file exists
+          if [ ! -f "data/full database.xml" ]; then
+            echo "Error: XML file not found after extraction"
+            exit 1
+          fi
+
+          echo "Downloaded $(du -h 'data/full database.xml' | cut -f1) XML file"
+
+      - name: Build SQLite Database
+        if: steps.check_drugbank.outputs.should_process == 'true'
+        run: |
+          echo "Building SQLite database from XML..."
+          node --max-old-space-size=2048 scripts/build-db.js
+
+          # Verify database was created
+          if [ ! -f "data/drugbank.db" ]; then
+            echo "Error: Database build failed"
+            exit 1
+          fi
+
+          echo "Database built successfully: $(du -h data/drugbank.db | cut -f1)"
+
+          # Run quick validation
+          sqlite3 data/drugbank.db "SELECT COUNT(*) FROM drugs;" > drug_count.txt
+          DRUG_COUNT=$(cat drug_count.txt)
+          echo "Total drugs in database: $DRUG_COUNT"
+
+          if [ "$DRUG_COUNT" -lt 15000 ]; then
+            echo "Error: Drug count too low ($DRUG_COUNT), expected >15000"
+            exit 1
+          fi
+
+      - name: Update VERSION file
+        if: steps.check_drugbank.outputs.should_process == 'true'
+        run: |
+          echo "${{ steps.check_drugbank.outputs.latest_version }}" > data/VERSION
+          echo "Updated VERSION file to ${{ steps.check_drugbank.outputs.latest_version }}"
+
+      - name: Commit VERSION file
+        if: steps.check_drugbank.outputs.should_process == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/VERSION
+          git commit -m "Update DrugBank version to ${{ steps.check_drugbank.outputs.latest_version }}" || echo "No changes to commit"
+          git push || echo "Nothing to push"
+
+      - name: Check if database changed
+        if: steps.check_drugbank.outputs.should_process == 'true'
+        id: check_changes
+        run: |
+          # Get drug count from new database
+          NEW_COUNT=$(cat drug_count.txt)
+          echo "new_count=$NEW_COUNT" >> $GITHUB_OUTPUT
+
+          # Get latest release info (if exists)
+          LATEST_RELEASE=$(gh release list --limit 1 --json tagName,body || echo "")
+
+          if [ -z "$LATEST_RELEASE" ]; then
+            echo "No previous release found - will create first release"
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          else
+            # Extract drug count from previous release body
+            PREV_COUNT=$(echo "$LATEST_RELEASE" | jq -r '.[0].body' | grep "Total Drugs:" | grep -oE '[0-9]+' || echo "0")
+            echo "Previous drug count: $PREV_COUNT"
+            echo "New drug count: $NEW_COUNT"
+
+            if [ "$NEW_COUNT" != "$PREV_COUNT" ]; then
+              echo "Database changed - will create new release"
+              echo "should_release=true" >> $GITHUB_OUTPUT
+            else
+              echo "Database unchanged - skipping release"
+              echo "should_release=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get current date for release
+        id: date
+        if: steps.check_changes.outputs.should_release == 'true'
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Create Release with Database
+        if: steps.check_changes.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: db-${{ steps.date.outputs.date }}
+          name: DrugBank Database ${{ steps.date.outputs.date }}
+          body: |
+            ## DrugBank Database Update
+
+            **Version**: ${{ steps.check_drugbank.outputs.latest_version }}
+            **Date**: ${{ steps.date.outputs.date }}
+            **Total Drugs**: $(cat drug_count.txt)
+            **Database Size**: $(du -h data/drugbank.db | cut -f1)
+
+            ### Usage
+            Download `drugbank.db` and place it in your project's `data/` folder:
+            ```bash
+            mkdir -p data
+            wget -O data/drugbank.db https://github.com/${{ github.repository }}/releases/download/db-${{ steps.date.outputs.date }}/drugbank.db
+            ```
+
+            ### What's Included
+            - All FDA-approved, investigational, and experimental drugs
+            - Drug interactions, targets, pathways, and products
+            - Optimized SQLite database with FTS5 search
+            - Query performance: <10ms
+
+            🤖 *Automated build from DrugBank XML source*
+          files: |
+            data/drugbank.db
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup large files
+        if: always()
+        run: |
+          rm -rf data/

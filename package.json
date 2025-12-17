@@ -1,0 +1,36 @@
+{
+  "name": "drugbank-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for DrugBank pharmaceutical database access",
+  "main": "build/index.js",
+  "type": "module",
+  "bin": {
+    "drugbank-mcp-server": "build/index.js"
+  },
+  "scripts": {
+    "download:db": "node scripts/download-db.js",
+    "build:db": "node scripts/build-db.js",
+    "build": "npm run build:db && node scripts/build.js",
+    "build:code": "node scripts/build.js",
+    "start": "node build/index.js",
+    "dev": "node src/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "drugbank",
+    "pharmaceutical",
+    "drugs",
+    "medicine"
+  ],
+  "author": "Joan Saez-Pons",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "better-sqlite3": "^12.5.0",
+    "fast-xml-parser": "^4.3.0",
+    "xml-stream": "^0.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
