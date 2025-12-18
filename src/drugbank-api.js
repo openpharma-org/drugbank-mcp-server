@@ -67,6 +67,15 @@ export async function handleDrugBankInfo(params) {
       case 'search_by_category':
         return await searchByCategory(params);
 
+      case 'get_external_identifiers':
+        return await getExternalIdentifiers(params);
+
+      case 'search_by_halflife':
+        return await searchByHalfLife(params);
+
+      case 'get_similar_drugs':
+        return await getSimilarDrugs(params);
+
       default:
         return {
           error: `Unknown method: ${method}`,
@@ -80,7 +89,10 @@ export async function handleDrugBankInfo(params) {
             'get_pathways',
             'search_by_structure',
             'get_products',
-            'search_by_category'
+            'search_by_category',
+            'get_external_identifiers',
+            'search_by_halflife',
+            'get_similar_drugs'
           ]
         };
     }
@@ -401,6 +413,133 @@ async function searchByCategory(params) {
   return {
     method: 'search_by_category',
     category: category,
+    count: results.length,
+    results: results
+  };
+}
+
+/**
+ * Get external identifiers for a drug (PubChem, ChEMBL, KEGG, UniProt, etc.)
+ * Enables cross-database lookups and integration with other resources
+ */
+async function getExternalIdentifiers(params) {
+  const { drugbank_id } = params;
+
+  if (!drugbank_id) {
+    return { error: 'Missing required parameter: drugbank_id' };
+  }
+
+  const drug = await parser.getDrugById(drugbank_id);
+
+  if (!drug) {
+    return {
+      error: `Drug not found: ${drugbank_id}`,
+      drugbank_id: drugbank_id
+    };
+  }
+
+  // Extract external identifiers - already parsed as object from JSON
+  const externalIds = drug.external_identifiers || drug['external-identifiers'] || {};
+
+  // Also include calculated properties that contain structure identifiers
+  const calcProps = drug.calculated_properties || drug['calculated-properties'] || {};
+
+  // Extract structure identifiers from calculated properties
+  const structureIds = {};
+  if (calcProps.SMILES) structureIds.smiles = calcProps.SMILES;
+  if (calcProps.InChI) structureIds.inchi = calcProps.InChI;
+  if (calcProps.InChIKey) structureIds.inchi_key = calcProps.InChIKey;
+
+  return {
+    method: 'get_external_identifiers',
+    drugbank_id: drugbank_id,
+    drug_name: drug.name || 'Unknown',
+    external_identifiers: externalIds,
+    structure_identifiers: structureIds,
+    all_drugbank_ids: drug.all_ids || []
+  };
+}
+
+/**
+ * Find drugs similar to a given drug
+ * Uses Jaccard similarity on targets, categories, and ATC codes
+ */
+async function getSimilarDrugs(params) {
+  const { drugbank_id, limit = 20 } = params;
+
+  if (!drugbank_id) {
+    return { error: 'Missing required parameter: drugbank_id' };
+  }
+
+  const refDrug = await parser.getDrugById(drugbank_id);
+  if (!refDrug) {
+    return {
+      error: `Drug not found: ${drugbank_id}`,
+      drugbank_id: drugbank_id
+    };
+  }
+
+  const similarDrugs = await parser.findSimilarDrugs(drugbank_id, limit);
+
+  const results = similarDrugs.map(item => ({
+    drugbank_id: item.drug.drugbank_id,
+    name: item.drug.name,
+    similarity_score: item.similarity_score,
+    target_similarity: item.target_similarity,
+    category_similarity: item.category_similarity,
+    atc_similarity: item.atc_similarity,
+    shared_targets: item.shared_targets,
+    shared_categories: item.shared_categories,
+    groups: item.drug.groups || []
+  }));
+
+  return {
+    method: 'get_similar_drugs',
+    drugbank_id: drugbank_id,
+    reference_drug: refDrug.name,
+    count: results.length,
+    note: 'Similarity based on shared targets (50%), categories (30%), and ATC codes (20%)',
+    results: results
+  };
+}
+
+/**
+ * Search drugs by half-life range (in hours)
+ * Allows finding drugs with specific elimination characteristics
+ */
+async function searchByHalfLife(params) {
+  const { min_hours, max_hours, limit = 20 } = params;
+
+  if (min_hours === undefined && max_hours === undefined) {
+    return { error: 'At least one of min_hours or max_hours is required' };
+  }
+
+  const minVal = min_hours !== undefined ? parseFloat(min_hours) : null;
+  const maxVal = max_hours !== undefined ? parseFloat(max_hours) : null;
+
+  if (minVal !== null && isNaN(minVal)) {
+    return { error: 'min_hours must be a valid number' };
+  }
+  if (maxVal !== null && isNaN(maxVal)) {
+    return { error: 'max_hours must be a valid number' };
+  }
+
+  const drugs = await parser.searchDrugsByHalfLife(minVal, maxVal, limit);
+
+  // Extract summary with half-life info
+  const results = drugs.map(drug => {
+    const summary = parser.extractDrugSummary(drug);
+    return {
+      ...summary,
+      half_life: drug.half_life || null,
+      half_life_hours: drug.half_life_hours || null
+    };
+  });
+
+  return {
+    method: 'search_by_halflife',
+    min_hours: minVal,
+    max_hours: maxVal,
     count: results.length,
     results: results
   };

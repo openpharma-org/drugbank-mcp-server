@@ -68,6 +68,7 @@ db.exec(`
     absorption TEXT,
     metabolism TEXT,
     half_life TEXT,
+    half_life_hours REAL,
     protein_binding TEXT,
     route_of_elimination TEXT,
     average_mass REAL,
@@ -95,6 +96,7 @@ db.exec(`
   CREATE INDEX idx_indication ON drugs(indication);
   CREATE INDEX idx_cas ON drugs(cas_number);
   CREATE INDEX idx_unii ON drugs(unii);
+  CREATE INDEX idx_half_life_hours ON drugs(half_life_hours);
 
   -- Full-text search
   CREATE VIRTUAL TABLE drugs_fts USING fts5(
@@ -148,7 +150,7 @@ const insertDrug = db.prepare(`
   INSERT INTO drugs (
     drugbank_id, name, description, cas_number, unii, state,
     indication, pharmacodynamics, mechanism_of_action, toxicity,
-    absorption, metabolism, half_life, protein_binding, route_of_elimination,
+    absorption, metabolism, half_life, half_life_hours, protein_binding, route_of_elimination,
     average_mass, monoisotopic_mass,
     all_ids, groups, categories, synonyms, calculated_properties,
     external_identifiers, drug_interactions, food_interactions,
@@ -156,7 +158,7 @@ const insertDrug = db.prepare(`
   ) VALUES (
     ?, ?, ?, ?, ?, ?,
     ?, ?, ?, ?,
-    ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?, ?,
     ?, ?,
     ?, ?, ?, ?, ?,
     ?, ?, ?,
@@ -317,12 +319,89 @@ function extractAtcCodes(drug) {
   }).filter(Boolean);
 }
 
+/**
+ * Parse half-life text into hours (normalized)
+ * Handles various formats like:
+ * - "4-5 hours"
+ * - "11-12 min"
+ * - "25 ± 10 hours"
+ * - "approximately 10 minutes"
+ * - "1.3 hours"
+ * - "3.5h"
+ * - "2 days"
+ * Returns the average/middle value in hours, or null if unparseable
+ */
+function parseHalfLifeToHours(halfLifeText) {
+  if (!halfLifeText || typeof halfLifeText !== 'string') return null;
+
+  // Normalize text
+  const text = halfLifeText.toLowerCase().trim();
+
+  // Common patterns to extract numeric values with units
+  const patterns = [
+    // Range with hyphen: "4-5 hours", "11-12 min"
+    /(\d+(?:\.\d+)?)\s*[-–to]+\s*(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|min|days?|d|weeks?|wks?|w)/i,
+    // With ± or plus/minus: "25 ± 10 hours"
+    /(\d+(?:\.\d+)?)\s*[±\+\-\/]\s*(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|min|days?|d|weeks?|wks?|w)/i,
+    // Simple value with unit: "1.3 hours", "10 minutes"
+    /(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|min|days?|d|weeks?|wks?|w)/i,
+    // Approximate: "approximately 10 minutes"
+    /(?:approximately|about|~|circa|around)\s*(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|min|days?|d|weeks?|wks?|w)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      let value;
+      let unit = match[match.length - 1]; // Last capture group is always unit
+
+      if (match.length === 4) {
+        // Range or ±: take average
+        const val1 = parseFloat(match[1]);
+        const val2 = parseFloat(match[2]);
+        value = (val1 + val2) / 2;
+      } else {
+        value = parseFloat(match[1]);
+      }
+
+      // Convert to hours
+      if (/^(minutes?|mins?|min)$/i.test(unit)) {
+        return value / 60;
+      } else if (/^(days?|d)$/i.test(unit)) {
+        return value * 24;
+      } else if (/^(weeks?|wks?|w)$/i.test(unit)) {
+        return value * 24 * 7;
+      } else {
+        // hours
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
 // Process drugs using streaming
 const stream = fs.createReadStream(XML_FILE);
 const xml = new XmlStream(stream);
 
-// DON'T use collect() - it causes memory issues
-// xml-stream will automatically collect sub-elements
+// Collect nested array elements - required for xml-stream to build arrays
+// Without these, only the last element of each type is preserved
+xml.collect('drugbank-id');
+xml.collect('group');
+xml.collect('category');
+xml.collect('synonym');
+xml.collect('property');
+xml.collect('external-identifier');
+xml.collect('drug-interaction');
+xml.collect('food-interaction');
+xml.collect('target');
+xml.collect('enzyme');
+xml.collect('carrier');
+xml.collect('transporter');
+xml.collect('pathway');
+xml.collect('product');
+xml.collect('atc-code');
 
 let count = 0;
 let seenIds = new Set();
@@ -343,6 +422,10 @@ xml.on('endElement: drug', function(drug) {
     const categories = extractCategories(drug);
     const targets = extractTargets(drug);
 
+    // Parse half-life to normalized hours
+    const halfLifeText = drug['half-life'] || null;
+    const halfLifeHours = parseHalfLifeToHours(halfLifeText);
+
     // Insert immediately using transaction (not batching in memory)
     insertOneDrug(
       drugbankId,
@@ -359,7 +442,8 @@ xml.on('endElement: drug', function(drug) {
         drug.toxicity || null,
         drug.absorption || null,
         drug.metabolism || null,
-        drug['half-life'] || null,
+        halfLifeText,
+        halfLifeHours,
         drug['protein-binding'] || null,
         drug['route-of-elimination'] || null,
         drug['average-mass'] || null,

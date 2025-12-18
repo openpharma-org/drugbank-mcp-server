@@ -4,7 +4,7 @@ Model Context Protocol (MCP) server providing access to the comprehensive DrugBa
 
 ## Features
 
-- **Single unified tool** (`drugbank_info`) with 10 methods
+- **Single unified tool** (`drugbank_info`) with 13 methods
 - **High-performance SQLite backend**: <10ms queries, ~50-100MB memory usage
 - Access to 17,430 drug records (13,166 small molecules + 4,264 biotech)
 - Comprehensive pharmaceutical data including:
@@ -182,6 +182,44 @@ Search drugs by therapeutic category.
 }
 ```
 
+#### 11. get_external_identifiers
+Get cross-database identifiers (PubChem, ChEMBL, KEGG, RxCUI, etc.) and structure identifiers.
+
+```json
+{
+  "method": "get_external_identifiers",
+  "drugbank_id": "DB02351"
+}
+```
+
+#### 12. search_by_halflife
+Find drugs by elimination half-life range (in hours). Useful for dosing considerations.
+
+```json
+{
+  "method": "search_by_halflife",
+  "min_hours": 12,
+  "max_hours": 48,
+  "limit": 20
+}
+```
+
+#### 13. get_similar_drugs
+Find drugs similar to a reference drug based on shared targets, categories, and ATC codes. Uses Jaccard similarity scoring.
+
+```json
+{
+  "method": "get_similar_drugs",
+  "drugbank_id": "APRD00003",
+  "limit": 20
+}
+```
+
+Returns similarity scores with breakdown by:
+- **target_similarity**: Shared protein/enzyme targets (50% weight)
+- **category_similarity**: Shared therapeutic categories (30% weight)
+- **atc_similarity**: Shared ATC classification codes (20% weight)
+
 ## Example Queries with Claude
 
 Once configured, you can ask Claude:
@@ -192,6 +230,9 @@ Once configured, you can ask Claude:
 - "Show me all drugs that target COX-2"
 - "Find drugs used for treating hypertension"
 - "What are the metabolic pathways for acetylsalicylic acid?"
+- "Find drugs similar to Nelfinavir" (HIV protease inhibitor)
+- "What are the external identifiers for Bivalirudin?"
+- "Find drugs with a half-life between 12 and 24 hours"
 
 **Note**: Use chemical/generic names (acetylsalicylic acid, ibuprofen, acetaminophen) rather than brand names (Aspirin, Advil, Tylenol) for best results.
 
@@ -200,7 +241,7 @@ Once configured, you can ask Claude:
 ```
 src/
 ├── index.js                    # MCP server (unified tool pattern)
-├── drugbank-api.js             # Business logic (10 methods)
+├── drugbank-api.js             # Business logic (13 methods)
 ├── drugbank-parser-sqlite.js   # SQLite query layer (fast)
 └── drugbank-parser.js          # XML fallback parser (slow)
 
@@ -216,8 +257,9 @@ data/                           # Database files
 
 scripts/
 ├── build.js                    # Copy src/ to build/
-├── build-db.js                 # Build SQLite from XML
-└── download-db.js              # Download pre-built database from GitHub releases
+├── build-db.js                 # Build SQLite from XML (includes half-life parsing)
+├── download-db.js              # Download pre-built database from GitHub releases
+└── migrate-halflife.js         # Migration script for half_life_hours column
 
 .github/workflows/
 └── update-database.yml         # Automated monthly database updates

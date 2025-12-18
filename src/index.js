@@ -81,7 +81,19 @@ Available methods:
 
 10. search_by_category - Search drugs by category
     Parameters: category (required), limit (optional, default: 20)
-    Example: { "method": "search_by_category", "category": "Anti-inflammatory" }`,
+    Example: { "method": "search_by_category", "category": "Anti-inflammatory" }
+
+11. get_external_identifiers - Get cross-database identifiers (PubChem, ChEMBL, KEGG, etc.)
+    Parameters: drugbank_id (required)
+    Example: { "method": "get_external_identifiers", "drugbank_id": "DB00945" }
+
+12. search_by_halflife - Find drugs by elimination half-life range (in hours)
+    Parameters: min_hours (optional), max_hours (optional), limit (optional, default: 20)
+    Example: { "method": "search_by_halflife", "min_hours": 12, "max_hours": 48 }
+
+13. get_similar_drugs - Find drugs similar to a given drug (by shared targets, categories, ATC codes)
+    Parameters: drugbank_id (required), limit (optional, default: 20)
+    Example: { "method": "get_similar_drugs", "drugbank_id": "DB00945" }`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -97,7 +109,10 @@ Available methods:
           'get_pathways',
           'search_by_structure',
           'get_products',
-          'search_by_category'
+          'search_by_category',
+          'get_external_identifiers',
+          'search_by_halflife',
+          'get_similar_drugs'
         ],
         description: 'Method to execute'
       },
@@ -132,6 +147,14 @@ Available methods:
       country: {
         type: 'string',
         description: 'Country code (optional, for get_products)'
+      },
+      min_hours: {
+        type: 'number',
+        description: 'Minimum half-life in hours (for search_by_halflife)'
+      },
+      max_hours: {
+        type: 'number',
+        description: 'Maximum half-life in hours (for search_by_halflife)'
       },
       limit: {
         type: 'number',

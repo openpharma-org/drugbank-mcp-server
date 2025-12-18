@@ -147,6 +147,57 @@ export async function searchDrugsByStructure(smiles, inchi, limit = 20) {
 }
 
 /**
+ * Search drugs by half-life range (in hours)
+ */
+export async function searchDrugsByHalfLife(minHours, maxHours, limit = 20) {
+  const database = getDb();
+
+  let stmt;
+  let drugs;
+
+  if (minHours !== null && maxHours !== null) {
+    stmt = database.prepare(`
+      SELECT * FROM drugs
+      WHERE half_life_hours IS NOT NULL
+        AND half_life_hours >= ?
+        AND half_life_hours <= ?
+      ORDER BY half_life_hours ASC
+      LIMIT ?
+    `);
+    drugs = stmt.all(minHours, maxHours, limit);
+  } else if (minHours !== null) {
+    stmt = database.prepare(`
+      SELECT * FROM drugs
+      WHERE half_life_hours IS NOT NULL
+        AND half_life_hours >= ?
+      ORDER BY half_life_hours ASC
+      LIMIT ?
+    `);
+    drugs = stmt.all(minHours, limit);
+  } else if (maxHours !== null) {
+    stmt = database.prepare(`
+      SELECT * FROM drugs
+      WHERE half_life_hours IS NOT NULL
+        AND half_life_hours <= ?
+      ORDER BY half_life_hours ASC
+      LIMIT ?
+    `);
+    drugs = stmt.all(maxHours, limit);
+  } else {
+    // No range specified, return drugs with known half-life
+    stmt = database.prepare(`
+      SELECT * FROM drugs
+      WHERE half_life_hours IS NOT NULL
+      ORDER BY half_life_hours ASC
+      LIMIT ?
+    `);
+    drugs = stmt.all(limit);
+  }
+
+  return drugs.map(drug => parseDrugRow(drug));
+}
+
+/**
  * Parse drug row from database (JSON columns)
  */
 function parseDrugRow(row) {
@@ -252,6 +303,104 @@ export async function loadDatabase() {
   return true;
 }
 
+/**
+ * Find drugs similar to a given drug based on shared targets, categories, and ATC codes
+ * Returns drugs with similarity scores
+ */
+export async function findSimilarDrugs(drugbankId, limit = 20) {
+  const database = getDb();
+
+  // Get the reference drug
+  const refDrug = await getDrugById(drugbankId);
+  if (!refDrug) return [];
+
+  // Get targets, categories, and ATC codes for the reference drug
+  const refTargets = new Set((refDrug.targets || []).map(t => t.name?.toLowerCase()).filter(Boolean));
+  const refCategories = new Set((refDrug.categories || []).map(c => (typeof c === 'string' ? c : c.category)?.toLowerCase()).filter(Boolean));
+  const refAtcCodes = new Set((refDrug.atc_codes || []).map(c => c?.substring(0, 5))); // Use first 5 chars (therapeutic level)
+
+  if (refTargets.size === 0 && refCategories.size === 0 && refAtcCodes.size === 0) {
+    return []; // No data to compare
+  }
+
+  // Find candidate drugs (those sharing at least one target or category)
+  const candidateIds = new Set();
+
+  // Find drugs with shared targets
+  if (refTargets.size > 0) {
+    const targetStmt = database.prepare(`
+      SELECT DISTINCT drug_id FROM drug_targets
+      WHERE LOWER(target_name) IN (${[...refTargets].map(() => '?').join(',')})
+      AND drug_id != ?
+    `);
+    const targetDrugs = targetStmt.all(...refTargets, drugbankId);
+    targetDrugs.forEach(d => candidateIds.add(d.drug_id));
+  }
+
+  // Find drugs with shared categories
+  if (refCategories.size > 0) {
+    const catStmt = database.prepare(`
+      SELECT DISTINCT drug_id FROM drug_categories
+      WHERE LOWER(category) IN (${[...refCategories].map(() => '?').join(',')})
+      AND drug_id != ?
+    `);
+    const catDrugs = catStmt.all(...refCategories, drugbankId);
+    catDrugs.forEach(d => candidateIds.add(d.drug_id));
+  }
+
+  if (candidateIds.size === 0) return [];
+
+  // Score each candidate
+  const scoredDrugs = [];
+  const candidateArray = [...candidateIds].slice(0, 500); // Limit candidates
+
+  for (const candId of candidateArray) {
+    const candDrug = await getDrugById(candId);
+    if (!candDrug) continue;
+
+    const candTargets = new Set((candDrug.targets || []).map(t => t.name?.toLowerCase()).filter(Boolean));
+    const candCategories = new Set((candDrug.categories || []).map(c => (typeof c === 'string' ? c : c.category)?.toLowerCase()).filter(Boolean));
+    const candAtcCodes = new Set((candDrug.atc_codes || []).map(c => c?.substring(0, 5)));
+
+    // Calculate Jaccard similarity for each dimension
+    const targetSim = jaccardSimilarity(refTargets, candTargets);
+    const categorySim = jaccardSimilarity(refCategories, candCategories);
+    const atcSim = jaccardSimilarity(refAtcCodes, candAtcCodes);
+
+    // Weighted composite score (targets matter most for mechanism)
+    const score = (targetSim * 0.5) + (categorySim * 0.3) + (atcSim * 0.2);
+
+    if (score > 0) {
+      scoredDrugs.push({
+        drug: candDrug,
+        similarity_score: Math.round(score * 1000) / 1000,
+        target_similarity: Math.round(targetSim * 1000) / 1000,
+        category_similarity: Math.round(categorySim * 1000) / 1000,
+        atc_similarity: Math.round(atcSim * 1000) / 1000,
+        shared_targets: [...refTargets].filter(t => candTargets.has(t)),
+        shared_categories: [...refCategories].filter(c => candCategories.has(c))
+      });
+    }
+  }
+
+  // Sort by score descending
+  scoredDrugs.sort((a, b) => b.similarity_score - a.similarity_score);
+
+  return scoredDrugs.slice(0, limit);
+}
+
+/**
+ * Jaccard similarity coefficient: |A ∩ B| / |A ∪ B|
+ */
+function jaccardSimilarity(setA, setB) {
+  if (setA.size === 0 && setB.size === 0) return 0;
+
+  const intersection = new Set([...setA].filter(x => setB.has(x)));
+  const union = new Set([...setA, ...setB]);
+
+  return intersection.size / union.size;
+}
+
 export default {
   loadDatabase,
   getDrugById,
@@ -261,6 +410,8 @@ export default {
   searchDrugsByCategory,
   searchDrugsByAtcCode,
   searchDrugsByStructure,
+  searchDrugsByHalfLife,
+  findSimilarDrugs,
   extractDrugSummary,
   extractDrugDetails
 };
