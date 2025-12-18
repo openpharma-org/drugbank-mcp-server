@@ -12,6 +12,9 @@ on:
         description: 'DrugBank XML download URL (optional override)'
         required: false
 
+permissions:
+  contents: write  # Allow pushing commits and creating releases
+
 jobs:
   build-database:
     runs-on: ubuntu-latest
