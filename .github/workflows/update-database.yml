@@ -24,55 +24,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check for new DrugBank release
-        id: check_drugbank
-        run: |
-          # Fetch DrugBank releases page (no auth required)
-          echo "Checking DrugBank releases page..."
-          RELEASES_HTML=$(curl -sL https://go.drugbank.com/releases)
-
-          # Extract latest version number (e.g., "5.1.13")
-          LATEST_VERSION=$(echo "$RELEASES_HTML" | grep -oP 'Version \K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-
-          # Validate version was extracted
-          if [ -z "$LATEST_VERSION" ]; then
-            echo "Error: Failed to extract DrugBank version from releases page"
-            exit 1
-          fi
-
-          echo "Latest DrugBank version: $LATEST_VERSION"
-          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
-
-          # Check our current version from VERSION file
-          if [ -f "data/VERSION" ]; then
-            CURRENT_VERSION=$(cat data/VERSION | tr -d '[:space:]')
-            echo "Current version: $CURRENT_VERSION"
-          else
-            CURRENT_VERSION="unknown"
-            echo "No VERSION file found - will process"
-          fi
-
-          if [ "$LATEST_VERSION" != "$CURRENT_VERSION" ]; then
-            echo "New DrugBank version detected ($CURRENT_VERSION → $LATEST_VERSION) - will process"
-            echo "should_process=true" >> $GITHUB_OUTPUT
-          else
-            echo "DrugBank version unchanged ($CURRENT_VERSION) - skipping"
-            echo "should_process=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Setup Node.js
-        if: steps.check_drugbank.outputs.should_process == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
-        if: steps.check_drugbank.outputs.should_process == 'true'
         run: npm ci
 
-      - name: Download DrugBank XML
-        if: steps.check_drugbank.outputs.should_process == 'true'
+      - name: Download and check DrugBank version
+        id: check_version
         env:
           DRUGBANK_USERNAME: ${{ secrets.DRUGBANK_USERNAME }}
           DRUGBANK_PASSWORD: ${{ secrets.DRUGBANK_PASSWORD }}
@@ -83,10 +45,76 @@ jobs:
           # Create data directory
           mkdir -p data
 
-          # Login and download (requires credentials)
+          # Download full ZIP file
           curl -Lf -o data/drugbank-full-database.zip \
             -u "$DRUGBANK_USERNAME:$DRUGBANK_PASSWORD" \
             "$DRUGBANK_URL"
+
+          echo "Download complete: $(du -h data/drugbank-full-database.zip | cut -f1)"
+
+          # Extract only first 5KB of XML to get version (no need to extract full file yet)
+          unzip -p data/drugbank-full-database.zip 2>/dev/null | head -c 5000 > data/header.xml
+          VERSION=$(grep -E '<drugbank [^>]*version=' data/header.xml | sed -n 's/.*version="\([^"]*\)".*/\1/p' | head -1)
+
+          if [ -z "$VERSION" ]; then
+            echo "Error: Failed to extract version from database"
+            exit 1
+          fi
+
+          echo "DrugBank version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          # Cleanup temporary file
+          rm -f data/header.xml
+
+      - name: Check if database changed
+        id: check_changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEW_VERSION="${{ steps.check_version.outputs.version }}"
+
+          # Check if VERSION file exists
+          if [ -f "data/VERSION" ]; then
+            CURRENT_VERSION=$(cat data/VERSION | tr -d '[:space:]')
+            echo "Current VERSION file: $CURRENT_VERSION"
+          else
+            CURRENT_VERSION=""
+            echo "No VERSION file found"
+          fi
+
+          echo "New version from DrugBank: $NEW_VERSION"
+
+          # Check if a release already exists for this version
+          # List all releases and check if any title contains the version
+          EXISTING_RELEASE=$(gh release list --limit 100 | grep -i "DrugBank.*$NEW_VERSION" || echo "")
+
+          if [ -n "$EXISTING_RELEASE" ]; then
+            echo "Release already exists for version $NEW_VERSION"
+            echo "Existing release: $EXISTING_RELEASE"
+            RELEASE_EXISTS=true
+          else
+            echo "No release found for version $NEW_VERSION"
+            RELEASE_EXISTS=false
+          fi
+
+          # Decide whether to process
+          if [ "$CURRENT_VERSION" = "$NEW_VERSION" ] && [ "$RELEASE_EXISTS" = true ]; then
+            echo "Version unchanged ($NEW_VERSION) and release exists - skipping build"
+            echo "should_process=false" >> $GITHUB_OUTPUT
+          else
+            if [ "$CURRENT_VERSION" != "$NEW_VERSION" ]; then
+              echo "Version changed ($CURRENT_VERSION → $NEW_VERSION) - will build"
+            elif [ "$RELEASE_EXISTS" = false ]; then
+              echo "Release missing for version $NEW_VERSION - will build"
+            fi
+            echo "should_process=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract DrugBank XML
+        if: steps.check_changes.outputs.should_process == 'true'
+        run: |
+          echo "Extracting XML from ZIP..."
 
           # Extract XML into data directory
           cd data
@@ -99,10 +127,10 @@ jobs:
             exit 1
           fi
 
-          echo "Downloaded $(du -h 'data/full database.xml' | cut -f1) XML file"
+          echo "Extracted $(du -h 'data/full database.xml' | cut -f1) XML file"
 
       - name: Build SQLite Database
-        if: steps.check_drugbank.outputs.should_process == 'true'
+        if: steps.check_changes.outputs.should_process == 'true'
         run: |
           echo "Building SQLite database from XML..."
           node --max-old-space-size=2048 scripts/build-db.js
@@ -127,11 +155,11 @@ jobs:
 
       - name: Get current date for release
         id: date
-        if: steps.check_drugbank.outputs.should_process == 'true'
+        if: steps.check_changes.outputs.should_process == 'true'
         run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
       - name: Create Release with Database
-        if: steps.check_drugbank.outputs.should_process == 'true'
+        if: steps.check_changes.outputs.should_process == 'true'
         run: |
           DRUG_COUNT=$(cat drug_count.txt)
           DB_SIZE=$(du -h data/drugbank.db | cut -f1)
@@ -140,7 +168,7 @@ jobs:
             --title "DrugBank Database ${{ steps.date.outputs.date }}" \
             --notes "## DrugBank Database Update
 
-          **Version**: ${{ steps.check_drugbank.outputs.latest_version }}
+          **Version**: ${{ steps.check_version.outputs.version }}
           **Date**: ${{ steps.date.outputs.date }}
           **Total Drugs**: $DRUG_COUNT
           **Database Size**: $DB_SIZE
@@ -164,18 +192,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update VERSION file
-        if: steps.check_drugbank.outputs.should_process == 'true'
+        if: steps.check_changes.outputs.should_process == 'true'
         run: |
-          echo "${{ steps.check_drugbank.outputs.latest_version }}" > data/VERSION
-          echo "Updated VERSION file to ${{ steps.check_drugbank.outputs.latest_version }}"
+          echo "${{ steps.check_version.outputs.version }}" > data/VERSION
+          echo "Updated VERSION file to ${{ steps.check_version.outputs.version }}"
 
       - name: Commit VERSION file
-        if: steps.check_drugbank.outputs.should_process == 'true'
+        if: steps.check_changes.outputs.should_process == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/VERSION
-          git commit -m "Update DrugBank version to ${{ steps.check_drugbank.outputs.latest_version }}"
+          git commit -m "Update DrugBank version to ${{ steps.check_version.outputs.version }}"
           git push
 
       - name: Cleanup large files
