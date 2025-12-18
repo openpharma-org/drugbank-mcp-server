@@ -9,9 +9,11 @@ build/
 dist/
 
 # Data directory (contains large database files)
-data/
-# But track the VERSION file
-!data/VERSION
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.xml
+data/*.zip
 
 # Environment variables
 .env
