@@ -168,36 +168,34 @@ jobs:
 
       - name: Create Release with Database
         if: steps.check_changes.outputs.should_release == 'true'
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: db-${{ steps.date.outputs.date }}
-          name: DrugBank Database ${{ steps.date.outputs.date }}
-          body: |
-            ## DrugBank Database Update
+        run: |
+          DRUG_COUNT=$(cat drug_count.txt)
+          DB_SIZE=$(du -h data/drugbank.db | cut -f1)
 
-            **Version**: ${{ steps.check_drugbank.outputs.latest_version }}
-            **Date**: ${{ steps.date.outputs.date }}
-            **Total Drugs**: $(cat drug_count.txt)
-            **Database Size**: $(du -h data/drugbank.db | cut -f1)
+          gh release create "db-${{ steps.date.outputs.date }}" \
+            --title "DrugBank Database ${{ steps.date.outputs.date }}" \
+            --notes "## DrugBank Database Update
 
-            ### Usage
-            Download `drugbank.db` and place it in your project's `data/` folder:
-            ```bash
-            mkdir -p data
-            wget -O data/drugbank.db https://github.com/${{ github.repository }}/releases/download/db-${{ steps.date.outputs.date }}/drugbank.db
-            ```
+          **Version**: ${{ steps.check_drugbank.outputs.latest_version }}
+          **Date**: ${{ steps.date.outputs.date }}
+          **Total Drugs**: $DRUG_COUNT
+          **Database Size**: $DB_SIZE
 
-            ### What's Included
-            - All FDA-approved, investigational, and experimental drugs
-            - Drug interactions, targets, pathways, and products
-            - Optimized SQLite database with FTS5 search
-            - Query performance: <10ms
+          ### Usage
+          Download \`drugbank.db\` and place it in your project's \`data/\` folder:
+          \`\`\`bash
+          mkdir -p data
+          wget -O data/drugbank.db https://github.com/${{ github.repository }}/releases/download/db-${{ steps.date.outputs.date }}/drugbank.db
+          \`\`\`
 
-            🤖 *Automated build from DrugBank XML source*
-          files: |
+          ### What's Included
+          - All FDA-approved, investigational, and experimental drugs
+          - Drug interactions, targets, pathways, and products
+          - Optimized SQLite database with FTS5 search
+          - Query performance: <10ms
+
+          🤖 *Automated build from DrugBank XML source*" \
             data/drugbank.db
-          draft: false
-          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
