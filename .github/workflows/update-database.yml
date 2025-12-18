@@ -33,6 +33,13 @@ jobs:
 
           # Extract latest version number (e.g., "5.1.13")
           LATEST_VERSION=$(echo "$RELEASES_HTML" | grep -oP 'Version \K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+
+          # Validate version was extracted
+          if [ -z "$LATEST_VERSION" ]; then
+            echo "Error: Failed to extract DrugBank version from releases page"
+            exit 1
+          fi
+
           echo "Latest DrugBank version: $LATEST_VERSION"
           echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
@@ -118,59 +125,13 @@ jobs:
             exit 1
           fi
 
-      - name: Update VERSION file
-        if: steps.check_drugbank.outputs.should_process == 'true'
-        run: |
-          echo "${{ steps.check_drugbank.outputs.latest_version }}" > data/VERSION
-          echo "Updated VERSION file to ${{ steps.check_drugbank.outputs.latest_version }}"
-
-      - name: Commit VERSION file
-        if: steps.check_drugbank.outputs.should_process == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/VERSION
-          git commit -m "Update DrugBank version to ${{ steps.check_drugbank.outputs.latest_version }}" || echo "No changes to commit"
-          git push || echo "Nothing to push"
-
-      - name: Check if database changed
-        if: steps.check_drugbank.outputs.should_process == 'true'
-        id: check_changes
-        run: |
-          # Get drug count from new database
-          NEW_COUNT=$(cat drug_count.txt)
-          echo "new_count=$NEW_COUNT" >> $GITHUB_OUTPUT
-
-          # Get latest release info (if exists)
-          LATEST_RELEASE=$(gh release list --limit 1 --json tagName,body || echo "")
-
-          if [ -z "$LATEST_RELEASE" ]; then
-            echo "No previous release found - will create first release"
-            echo "should_release=true" >> $GITHUB_OUTPUT
-          else
-            # Extract drug count from previous release body
-            PREV_COUNT=$(echo "$LATEST_RELEASE" | jq -r '.[0].body' | grep "Total Drugs:" | grep -oE '[0-9]+' || echo "0")
-            echo "Previous drug count: $PREV_COUNT"
-            echo "New drug count: $NEW_COUNT"
-
-            if [ "$NEW_COUNT" != "$PREV_COUNT" ]; then
-              echo "Database changed - will create new release"
-              echo "should_release=true" >> $GITHUB_OUTPUT
-            else
-              echo "Database unchanged - skipping release"
-              echo "should_release=false" >> $GITHUB_OUTPUT
-            fi
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Get current date for release
         id: date
-        if: steps.check_changes.outputs.should_release == 'true'
+        if: steps.check_drugbank.outputs.should_process == 'true'
         run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
 
       - name: Create Release with Database
-        if: steps.check_changes.outputs.should_release == 'true'
+        if: steps.check_drugbank.outputs.should_process == 'true'
         run: |
           DRUG_COUNT=$(cat drug_count.txt)
           DB_SIZE=$(du -h data/drugbank.db | cut -f1)
@@ -201,6 +162,21 @@ jobs:
             data/drugbank.db
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update VERSION file
+        if: steps.check_drugbank.outputs.should_process == 'true'
+        run: |
+          echo "${{ steps.check_drugbank.outputs.latest_version }}" > data/VERSION
+          echo "Updated VERSION file to ${{ steps.check_drugbank.outputs.latest_version }}"
+
+      - name: Commit VERSION file
+        if: steps.check_drugbank.outputs.should_process == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/VERSION
+          git commit -m "Update DrugBank version to ${{ steps.check_drugbank.outputs.latest_version }}"
+          git push
 
       - name: Cleanup large files
         if: always()
