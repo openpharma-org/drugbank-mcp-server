@@ -205,4 +205,5 @@ jobs:
       - name: Cleanup large files
         if: always()
         run: |
-          rm -rf data/
+          rm -f data/*.db data/*.db-shm data/*.db-wal data/*.xml data/*.zip
+          echo "Cleaned up large files, kept VERSION"
