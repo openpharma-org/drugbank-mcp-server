@@ -24,18 +24,27 @@ Model Context Protocol (MCP) server providing access to the comprehensive DrugBa
 cd drugbank-mcp-server
 npm install
 
-# Download pre-built SQLite database (31MB)
+# Download pre-built SQLite database from latest GitHub release
 npm run download:db
 
 # Build the project (copies src/ to build/)
 npm run build:code
 ```
 
-**Alternative**: Build database from DrugBank XML (requires DrugBank account):
-```bash
-# Place "full database.xml" in data/ folder, then:
-npm run build:db
-```
+### Database Versioning
+
+The database version is tracked in `data/VERSION` and automatically updated monthly:
+- **Current version**: 5.1 (see `data/VERSION`)
+- **Automated updates**: Monthly via GitHub Actions (1st of each month)
+- **Manual updates**: Run `npm run download:db` to get the latest release
+- **GitHub releases**: Each database update creates a new release with the database file
+
+The workflow automatically:
+1. Downloads the latest DrugBank XML
+2. Extracts the version from the XML header
+3. Compares with the tracked version in `data/VERSION`
+4. Only builds and releases if the version changed or release is missing
+5. Updates `data/VERSION` and commits to the repository
 
 ## Usage 
 
@@ -201,16 +210,17 @@ build/                          # Built files (copied from src/)
 ├── drugbank-parser-sqlite.js
 └── drugbank-parser.js
 
-data/                           # Database files (gitignored)
-└── drugbank.db                 # SQLite database (31MB)
+data/                           # Database files
+├── VERSION                     # Tracked version (e.g., "5.1")
+└── drugbank.db                 # SQLite database (31MB, gitignored)
 
 scripts/
 ├── build.js                    # Copy src/ to build/
 ├── build-db.js                 # Build SQLite from XML
-└── download-db.js              # Download pre-built database
+└── download-db.js              # Download pre-built database from GitHub releases
 
 .github/workflows/
-└── update-database.yml         # Automated quarterly updates
+└── update-database.yml         # Automated monthly database updates
 ```
 
 **Pattern**: Single unified tool with method enum (following who-mcp-server, sec-mcp-server, cdc-mcp-server patterns)
@@ -233,9 +243,10 @@ scripts/
 ## Data Source
 
 - **Database**: DrugBank (Full Database)
+- **Current version**: 5.1 (see `data/VERSION`)
 - **Records**: 17,430 drugs (13,166 small molecules + 4,264 biotech)
-- **Updates**: Automated quarterly via GitHub Actions
-- **Source size**: 1.5GB XML → 31.1MB SQLite
+- **Updates**: Automated monthly via GitHub Actions (1st of each month)
+- **Download**: Pre-built databases available in [GitHub Releases](../../releases)
 
 ## Development
 
@@ -253,25 +264,6 @@ npm start
 # Logs go to stderr, MCP responses go to stdout
 ```
 
-## Automated Database Updates (for Maintainers)
-
-GitHub Actions automatically checks for updates monthly:
-
-1. **Set GitHub Secrets** (in repository settings):
-   - `DRUGBANK_USERNAME`: Your DrugBank account username
-   - `DRUGBANK_PASSWORD`: Your DrugBank account password
-
-2. **Manual Trigger**: Go to Actions → "Update DrugBank Database" → Run workflow
-
-3. **How it works**:
-   - Checks DrugBank releases page for new version (no download)
-   - If new version detected:
-     - Downloads latest DrugBank XML
-     - Builds SQLite database
-     - Validates drug count (>15,000)
-     - Publishes to GitHub Releases
-   - If no change: skips build (saves time/bandwidth)
-
 ## Troubleshooting
 
 **Server not appearing in Claude Desktop:**
@@ -280,24 +272,16 @@ GitHub Actions automatically checks for updates monthly:
 - Check Claude Desktop logs for errors
 
 **Database not found:**
-- Run `npm run download:db` to download pre-built SQLite database
-- Or place `full database.xml` in `data/` folder and run `npm run build:db`
+- Run `npm run download:db` to download the latest pre-built SQLite database from GitHub releases
 - Database file should be at `data/drugbank.db`
+- Check current version: `cat data/VERSION`
 
-**Slow queries (>1 second):**
-- Check if SQLite database exists at `data/drugbank.db`
-- If using XML fallback mode, first query takes 30-60s (server will log mode on startup)
-- SQLite mode provides <10ms queries
+**Check for database updates:**
+- Current version is tracked in `data/VERSION`
+- Latest releases are available at [GitHub Releases](../../releases)
+- Run `npm run download:db` to get the latest version
+- Database is automatically updated monthly (1st of each month)
 
 ## License
 
 MIT
-
-## Credits
-
-Built following MCP patterns from:
-- who-mcp-server
-- sec-mcp-server
-- cdc-mcp-server
-
-Data source: DrugBank (https://go.drugbank.com/)
