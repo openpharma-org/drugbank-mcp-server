@@ -73,8 +73,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           NEW_VERSION="${{ steps.check_version.outputs.version }}"
+          TODAY=$(date +'%Y-%m-%d')
 
-          # Check if VERSION file exists
+          # Check if VERSION file exists and matches
           if [ -f "data/VERSION" ]; then
             CURRENT_VERSION=$(cat data/VERSION | tr -d '[:space:]')
             echo "Current VERSION file: $CURRENT_VERSION"
@@ -84,30 +85,22 @@ jobs:
           fi
 
           echo "New version from DrugBank: $NEW_VERSION"
+          echo "Today's date: $TODAY"
 
-          # Check if a release already exists for this version
-          # List all releases and check if any title contains the version
-          EXISTING_RELEASE=$(gh release list --limit 100 | grep -i "DrugBank.*$NEW_VERSION" || echo "")
+          # Primary check: VERSION file
+          if [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
+            echo "Version unchanged ($NEW_VERSION) - checking if release exists..."
 
-          if [ -n "$EXISTING_RELEASE" ]; then
-            echo "Release already exists for version $NEW_VERSION"
-            echo "Existing release: $EXISTING_RELEASE"
-            RELEASE_EXISTS=true
-          else
-            echo "No release found for version $NEW_VERSION"
-            RELEASE_EXISTS=false
-          fi
-
-          # Decide whether to process
-          if [ "$CURRENT_VERSION" = "$NEW_VERSION" ] && [ "$RELEASE_EXISTS" = true ]; then
-            echo "Version unchanged ($NEW_VERSION) and release exists - skipping build"
-            echo "should_process=false" >> $GITHUB_OUTPUT
-          else
-            if [ "$CURRENT_VERSION" != "$NEW_VERSION" ]; then
-              echo "Version changed ($CURRENT_VERSION → $NEW_VERSION) - will build"
-            elif [ "$RELEASE_EXISTS" = false ]; then
-              echo "Release missing for version $NEW_VERSION - will build"
+            # Secondary check: Does today's release exist?
+            if gh release view "db-$TODAY" &>/dev/null; then
+              echo "Release db-$TODAY already exists - skipping build"
+              echo "should_process=false" >> $GITHUB_OUTPUT
+            else
+              echo "Release missing for today - will build"
+              echo "should_process=true" >> $GITHUB_OUTPUT
             fi
+          else
+            echo "Version changed ($CURRENT_VERSION → $NEW_VERSION) - will build"
             echo "should_process=true" >> $GITHUB_OUTPUT
           fi
 
@@ -203,8 +196,14 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/VERSION
-          git commit -m "Update DrugBank version to ${{ steps.check_version.outputs.version }}"
-          git push
+
+          # Only commit if there are changes
+          if git diff --staged --quiet; then
+            echo "VERSION file unchanged, skipping commit"
+          else
+            git commit -m "Update DrugBank version to ${{ steps.check_version.outputs.version }}"
+            git push
+          fi
 
       - name: Cleanup large files
         if: always()
