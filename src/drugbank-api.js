@@ -76,6 +76,15 @@ export async function handleDrugBankInfo(params) {
       case 'get_similar_drugs':
         return await getSimilarDrugs(params);
 
+      case 'search_by_carrier':
+        return await searchByCarrier(params);
+
+      case 'search_by_transporter':
+        return await searchByTransporter(params);
+
+      case 'get_salts':
+        return await getSalts(params);
+
       default:
         return {
           error: `Unknown method: ${method}`,
@@ -92,7 +101,10 @@ export async function handleDrugBankInfo(params) {
             'search_by_category',
             'get_external_identifiers',
             'search_by_halflife',
-            'get_similar_drugs'
+            'get_similar_drugs',
+            'search_by_carrier',
+            'search_by_transporter',
+            'get_salts'
           ]
         };
     }
@@ -542,6 +554,79 @@ async function searchByHalfLife(params) {
     max_hours: maxVal,
     count: results.length,
     results: results
+  };
+}
+
+/**
+ * Search drugs by carrier protein
+ * Carriers are proteins that transport drugs within the body
+ */
+async function searchByCarrier(params) {
+  const { carrier, limit = 20 } = params;
+
+  if (!carrier) {
+    return { error: 'Missing required parameter: carrier' };
+  }
+
+  const results = await parser.searchDrugsByCarrier(carrier, limit);
+
+  return {
+    method: 'search_by_carrier',
+    carrier: carrier,
+    count: results.length,
+    results: results
+  };
+}
+
+/**
+ * Search drugs by transporter protein
+ * Transporters are membrane proteins that move drugs across cell membranes
+ */
+async function searchByTransporter(params) {
+  const { transporter, limit = 20 } = params;
+
+  if (!transporter) {
+    return { error: 'Missing required parameter: transporter' };
+  }
+
+  const results = await parser.searchDrugsByTransporter(transporter, limit);
+
+  return {
+    method: 'search_by_transporter',
+    transporter: transporter,
+    count: results.length,
+    results: results
+  };
+}
+
+/**
+ * Get salt forms for a drug
+ * Salts are different chemical forms of a drug (e.g., hydrochloride, sulfate)
+ */
+async function getSalts(params) {
+  const { drugbank_id } = params;
+
+  if (!drugbank_id) {
+    return { error: 'Missing required parameter: drugbank_id' };
+  }
+
+  const drug = await parser.getDrugById(drugbank_id);
+
+  if (!drug) {
+    return {
+      error: `Drug not found: ${drugbank_id}`,
+      drugbank_id: drugbank_id
+    };
+  }
+
+  const salts = await parser.getDrugSalts(drugbank_id);
+
+  return {
+    method: 'get_salts',
+    drugbank_id: drugbank_id,
+    drug_name: drug.name || 'Unknown',
+    salt_count: salts.length,
+    salts: salts
   };
 }
 

@@ -93,7 +93,19 @@ Available methods:
 
 13. get_similar_drugs - Find drugs similar to a given drug (by shared targets, categories, ATC codes)
     Parameters: drugbank_id (required), limit (optional, default: 20)
-    Example: { "method": "get_similar_drugs", "drugbank_id": "DB00945" }`,
+    Example: { "method": "get_similar_drugs", "drugbank_id": "DB00945" }
+
+14. search_by_carrier - Find drugs by carrier protein (proteins that transport drugs in the body)
+    Parameters: carrier (required), limit (optional, default: 20)
+    Example: { "method": "search_by_carrier", "carrier": "Albumin" }
+
+15. search_by_transporter - Find drugs by transporter protein (membrane proteins that move drugs across cells)
+    Parameters: transporter (required), limit (optional, default: 20)
+    Example: { "method": "search_by_transporter", "transporter": "P-glycoprotein" }
+
+16. get_salts - Get salt forms for a drug (e.g., hydrochloride, sulfate)
+    Parameters: drugbank_id (required)
+    Example: { "method": "get_salts", "drugbank_id": "DB00945" }`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -112,7 +124,10 @@ Available methods:
           'search_by_category',
           'get_external_identifiers',
           'search_by_halflife',
-          'get_similar_drugs'
+          'get_similar_drugs',
+          'search_by_carrier',
+          'search_by_transporter',
+          'get_salts'
         ],
         description: 'Method to execute'
       },
@@ -155,6 +170,14 @@ Available methods:
       max_hours: {
         type: 'number',
         description: 'Maximum half-life in hours (for search_by_halflife)'
+      },
+      carrier: {
+        type: 'string',
+        description: 'Carrier protein name (for search_by_carrier)'
+      },
+      transporter: {
+        type: 'string',
+        description: 'Transporter protein name (for search_by_transporter)'
       },
       limit: {
         type: 'number',

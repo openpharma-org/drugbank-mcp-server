@@ -141,6 +141,41 @@ db.exec(`
     FOREIGN KEY (drug_id) REFERENCES drugs(drugbank_id)
   );
   CREATE INDEX idx_category ON drug_categories(category COLLATE NOCASE);
+
+  -- Carriers table (proteins that carry drugs in the body)
+  CREATE TABLE drug_carriers (
+    drug_id TEXT,
+    carrier_id TEXT,
+    carrier_name TEXT,
+    organism TEXT,
+    known_action TEXT,
+    FOREIGN KEY (drug_id) REFERENCES drugs(drugbank_id)
+  );
+  CREATE INDEX idx_carrier_name ON drug_carriers(carrier_name COLLATE NOCASE);
+
+  -- Transporters table (proteins that transport drugs across membranes)
+  CREATE TABLE drug_transporters (
+    drug_id TEXT,
+    transporter_id TEXT,
+    transporter_name TEXT,
+    organism TEXT,
+    known_action TEXT,
+    FOREIGN KEY (drug_id) REFERENCES drugs(drugbank_id)
+  );
+  CREATE INDEX idx_transporter_name ON drug_transporters(transporter_name COLLATE NOCASE);
+
+  -- Salts table (different salt forms of drugs)
+  CREATE TABLE drug_salts (
+    drug_id TEXT,
+    salt_id TEXT,
+    salt_name TEXT,
+    unii TEXT,
+    cas_number TEXT,
+    inchikey TEXT,
+    average_mass REAL,
+    FOREIGN KEY (drug_id) REFERENCES drugs(drugbank_id)
+  );
+  CREATE INDEX idx_salt_name ON drug_salts(salt_name COLLATE NOCASE);
 `);
 
 console.log('[DB Builder] Streaming and parsing XML...');
@@ -168,9 +203,12 @@ const insertDrug = db.prepare(`
 
 const insertTarget = db.prepare('INSERT INTO drug_targets (drug_id, target_name, organism) VALUES (?, ?, ?)');
 const insertCategory = db.prepare('INSERT INTO drug_categories (drug_id, category) VALUES (?, ?)');
+const insertCarrier = db.prepare('INSERT INTO drug_carriers (drug_id, carrier_id, carrier_name, organism, known_action) VALUES (?, ?, ?, ?, ?)');
+const insertTransporter = db.prepare('INSERT INTO drug_transporters (drug_id, transporter_id, transporter_name, organism, known_action) VALUES (?, ?, ?, ?, ?)');
+const insertSalt = db.prepare('INSERT INTO drug_salts (drug_id, salt_id, salt_name, unii, cas_number, inchikey, average_mass) VALUES (?, ?, ?, ?, ?, ?, ?)');
 
 // Create a simple transaction wrapper that processes ONE drug at a time
-const insertOneDrug = db.transaction((drugbankId, drugParams, targets, categories) => {
+const insertOneDrug = db.transaction((drugbankId, drugParams, targets, categories, carriers, transporters, salts) => {
   insertDrug.run(...drugParams);
 
   for (const target of targets) {
@@ -181,6 +219,24 @@ const insertOneDrug = db.transaction((drugbankId, drugParams, targets, categorie
 
   for (const category of categories) {
     insertCategory.run(drugbankId, category);
+  }
+
+  for (const carrier of carriers) {
+    if (carrier.name) {
+      insertCarrier.run(drugbankId, carrier.id || null, carrier.name, carrier.organism || null, carrier.known_action || null);
+    }
+  }
+
+  for (const transporter of transporters) {
+    if (transporter.name) {
+      insertTransporter.run(drugbankId, transporter.id || null, transporter.name, transporter.organism || null, transporter.known_action || null);
+    }
+  }
+
+  for (const salt of salts) {
+    if (salt.name) {
+      insertSalt.run(drugbankId, salt.id || null, salt.name, salt.unii || null, salt.cas_number || null, salt.inchikey || null, salt.average_mass || null);
+    }
   }
 });
 
@@ -286,6 +342,58 @@ function extractEnzymes(drug) {
     name: e.name || null,
     organism: e.organism || null
   }));
+}
+
+function extractCarriers(drug) {
+  const carriers = drug.carriers?.carrier || [];
+  const carrierArray = extractArray(carriers);
+  return carrierArray.slice(0, 50).map(c => ({
+    id: c.id || null,
+    name: c.name || null,
+    organism: c.organism || null,
+    known_action: c['known-action'] || null
+  }));
+}
+
+function extractTransporters(drug) {
+  const transporters = drug.transporters?.transporter || [];
+  const transporterArray = extractArray(transporters);
+  return transporterArray.slice(0, 50).map(t => ({
+    id: t.id || null,
+    name: t.name || null,
+    organism: t.organism || null,
+    known_action: t['known-action'] || null
+  }));
+}
+
+function extractSalts(drug) {
+  const salts = drug.salts?.salt || [];
+  const saltArray = extractArray(salts);
+  return saltArray.map(s => {
+    // drugbank-id can be an array (due to xml.collect) or a single value
+    let saltId = null;
+    const dbId = s['drugbank-id'];
+    if (dbId) {
+      if (Array.isArray(dbId)) {
+        // Find primary ID or use first
+        const primary = dbId.find(id => id.$?.primary === 'true' || id.$?.primary === true);
+        const idObj = primary || dbId[0];
+        saltId = typeof idObj === 'string' ? idObj : (idObj.$text || null);
+      } else if (typeof dbId === 'string') {
+        saltId = dbId;
+      } else {
+        saltId = dbId.$text || null;
+      }
+    }
+    return {
+      id: saltId,
+      name: s.name || null,
+      unii: s.unii || null,
+      cas_number: s['cas-number'] || null,
+      inchikey: s.inchikey || null,
+      average_mass: s['average-mass'] ? parseFloat(s['average-mass']) : null
+    };
+  });
 }
 
 function extractPathways(drug) {
@@ -402,6 +510,7 @@ xml.collect('transporter');
 xml.collect('pathway');
 xml.collect('product');
 xml.collect('atc-code');
+xml.collect('salt');
 
 let count = 0;
 let seenIds = new Set();
@@ -421,6 +530,9 @@ xml.on('endElement: drug', function(drug) {
 
     const categories = extractCategories(drug);
     const targets = extractTargets(drug);
+    const carriers = extractCarriers(drug);
+    const transporters = extractTransporters(drug);
+    const salts = extractSalts(drug);
 
     // Parse half-life to normalized hours
     const halfLifeText = drug['half-life'] || null;
@@ -458,14 +570,17 @@ xml.on('endElement: drug', function(drug) {
         JSON.stringify(extractFoodInteractions(drug)),
         JSON.stringify(targets),
         JSON.stringify(extractEnzymes(drug)),
-        JSON.stringify([]),
-        JSON.stringify([]),
+        JSON.stringify(carriers),
+        JSON.stringify(transporters),
         JSON.stringify(extractPathways(drug)),
         JSON.stringify(extractProducts(drug)),
         JSON.stringify(extractAtcCodes(drug))
       ],
       targets.filter(t => t.name),
-      categories
+      categories,
+      carriers.filter(c => c.name),
+      transporters.filter(t => t.name),
+      salts.filter(s => s.name)
     );
 
     count++;

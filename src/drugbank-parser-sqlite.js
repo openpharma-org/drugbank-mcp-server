@@ -113,6 +113,84 @@ export async function searchDrugsByCategory(category, limit = 20) {
 }
 
 /**
+ * Search drugs by carrier protein
+ */
+export async function searchDrugsByCarrier(carrier, limit = 20) {
+  const database = getDb();
+
+  const stmt = database.prepare(`
+    SELECT DISTINCT drugs.*, dc.carrier_name, dc.organism, dc.known_action
+    FROM drug_carriers dc
+    JOIN drugs ON dc.drug_id = drugs.drugbank_id
+    WHERE dc.carrier_name LIKE ?
+    LIMIT ?
+  `);
+
+  const results = stmt.all(`%${carrier}%`, limit);
+  return results.map(row => {
+    const drug = parseDrugRow(row);
+    return {
+      ...extractDrugSummary(drug),
+      matched_carrier: {
+        name: row.carrier_name,
+        organism: row.organism,
+        known_action: row.known_action
+      }
+    };
+  });
+}
+
+/**
+ * Search drugs by transporter protein
+ */
+export async function searchDrugsByTransporter(transporter, limit = 20) {
+  const database = getDb();
+
+  const stmt = database.prepare(`
+    SELECT DISTINCT drugs.*, dt.transporter_name, dt.organism, dt.known_action
+    FROM drug_transporters dt
+    JOIN drugs ON dt.drug_id = drugs.drugbank_id
+    WHERE dt.transporter_name LIKE ?
+    LIMIT ?
+  `);
+
+  const results = stmt.all(`%${transporter}%`, limit);
+  return results.map(row => {
+    const drug = parseDrugRow(row);
+    return {
+      ...extractDrugSummary(drug),
+      matched_transporter: {
+        name: row.transporter_name,
+        organism: row.organism,
+        known_action: row.known_action
+      }
+    };
+  });
+}
+
+/**
+ * Get salts for a drug
+ */
+export async function getDrugSalts(drugbankId) {
+  const database = getDb();
+
+  const stmt = database.prepare(`
+    SELECT * FROM drug_salts
+    WHERE drug_id = ?
+  `);
+
+  const salts = stmt.all(drugbankId);
+  return salts.map(s => ({
+    salt_id: s.salt_id,
+    name: s.salt_name,
+    unii: s.unii,
+    cas_number: s.cas_number,
+    inchikey: s.inchikey,
+    average_mass: s.average_mass
+  }));
+}
+
+/**
  * Search drugs by ATC code
  */
 export async function searchDrugsByAtcCode(code, limit = 20) {
@@ -408,6 +486,9 @@ export default {
   searchDrugsByIndication,
   searchDrugsByTarget,
   searchDrugsByCategory,
+  searchDrugsByCarrier,
+  searchDrugsByTransporter,
+  getDrugSalts,
   searchDrugsByAtcCode,
   searchDrugsByStructure,
   searchDrugsByHalfLife,

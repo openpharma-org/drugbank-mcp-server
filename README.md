@@ -4,7 +4,7 @@ Model Context Protocol (MCP) server providing access to the comprehensive DrugBa
 
 ## Features
 
-- **Single unified tool** (`drugbank_info`) with 13 methods
+- **Single unified tool** (`drugbank_info`) with 16 methods
 - **High-performance SQLite backend**: <10ms queries, ~50-100MB memory usage
 - Access to 17,430 drug records (13,166 small molecules + 4,264 biotech)
 - Comprehensive pharmaceutical data including:
@@ -12,10 +12,12 @@ Model Context Protocol (MCP) server providing access to the comprehensive DrugBa
   - Clinical indications and mechanisms of action
   - Chemical structures (SMILES, InChI)
   - Drug interactions and contraindications
-  - Target proteins, enzymes, carriers
+  - Target proteins, enzymes, carriers, transporters
   - Metabolic pathways
   - Market products and regulatory information
-  - Pharmacokinetics and toxicity data
+  - Pharmacokinetics (half-life search) and toxicity data
+  - Salt forms and external database identifiers
+  - Drug similarity search
 
 ## Installation
 
@@ -220,6 +222,38 @@ Returns similarity scores with breakdown by:
 - **category_similarity**: Shared therapeutic categories (30% weight)
 - **atc_similarity**: Shared ATC classification codes (20% weight)
 
+#### 14. search_by_carrier
+Find drugs by carrier protein (proteins that transport drugs in the body, like albumin).
+
+```json
+{
+  "method": "search_by_carrier",
+  "carrier": "Albumin",
+  "limit": 20
+}
+```
+
+#### 15. search_by_transporter
+Find drugs by transporter protein (membrane proteins that move drugs across cell membranes).
+
+```json
+{
+  "method": "search_by_transporter",
+  "transporter": "P-glycoprotein",
+  "limit": 20
+}
+```
+
+#### 16. get_salts
+Get salt forms for a drug (different chemical forms like hydrochloride, sulfate).
+
+```json
+{
+  "method": "get_salts",
+  "drugbank_id": "DB00007"
+}
+```
+
 ## Example Queries with Claude
 
 Once configured, you can ask Claude:
@@ -233,6 +267,9 @@ Once configured, you can ask Claude:
 - "Find drugs similar to Nelfinavir" (HIV protease inhibitor)
 - "What are the external identifiers for Bivalirudin?"
 - "Find drugs with a half-life between 12 and 24 hours"
+- "What drugs are carried by albumin?"
+- "Find drugs transported by P-glycoprotein"
+- "What salt forms are available for leuprolide?"
 
 **Note**: Use chemical/generic names (acetylsalicylic acid, ibuprofen, acetaminophen) rather than brand names (Aspirin, Advil, Tylenol) for best results.
 
@@ -241,7 +278,7 @@ Once configured, you can ask Claude:
 ```
 src/
 ├── index.js                    # MCP server (unified tool pattern)
-├── drugbank-api.js             # Business logic (13 methods)
+├── drugbank-api.js             # Business logic (16 methods)
 ├── drugbank-parser-sqlite.js   # SQLite query layer (fast)
 └── drugbank-parser.js          # XML fallback parser (slow)
 

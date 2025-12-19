@@ -352,13 +352,87 @@ test('get_similar_drugs: requires drugbank_id parameter', async () => {
 });
 
 // ============================================================
+// 14. search_by_carrier (NEW)
+// ============================================================
+test('search_by_carrier: finds drugs by carrier protein', async () => {
+  const result = await handleDrugBankInfo({ method: 'search_by_carrier', carrier: 'Albumin', limit: 10 });
+  assert(!result.error, `Got error: ${result.error}`);
+  assert(result.count >= 0, 'Should return count');
+  assert(Array.isArray(result.results), 'Should return results array');
+});
+
+test('search_by_carrier: returns matched carrier info', async () => {
+  const result = await handleDrugBankInfo({ method: 'search_by_carrier', carrier: 'Albumin', limit: 5 });
+  if (result.count > 0) {
+    const drug = result.results[0];
+    assert(drug.matched_carrier, 'Should have matched_carrier');
+    assert(drug.matched_carrier.name, 'matched_carrier should have name');
+  }
+});
+
+test('search_by_carrier: requires carrier parameter', async () => {
+  const result = await handleDrugBankInfo({ method: 'search_by_carrier' });
+  assert(result.error, 'Should return error without carrier');
+});
+
+// ============================================================
+// 15. search_by_transporter (NEW)
+// ============================================================
+test('search_by_transporter: finds drugs by transporter protein', async () => {
+  const result = await handleDrugBankInfo({ method: 'search_by_transporter', transporter: 'P-glycoprotein', limit: 10 });
+  assert(!result.error, `Got error: ${result.error}`);
+  assert(result.count >= 0, 'Should return count');
+  assert(Array.isArray(result.results), 'Should return results array');
+});
+
+test('search_by_transporter: returns matched transporter info', async () => {
+  const result = await handleDrugBankInfo({ method: 'search_by_transporter', transporter: 'P-glycoprotein', limit: 5 });
+  if (result.count > 0) {
+    const drug = result.results[0];
+    assert(drug.matched_transporter, 'Should have matched_transporter');
+    assert(drug.matched_transporter.name, 'matched_transporter should have name');
+  }
+});
+
+test('search_by_transporter: requires transporter parameter', async () => {
+  const result = await handleDrugBankInfo({ method: 'search_by_transporter' });
+  assert(result.error, 'Should return error without transporter');
+});
+
+// ============================================================
+// 16. get_salts (NEW)
+// ============================================================
+test('get_salts: returns salt forms for drug', async () => {
+  const result = await handleDrugBankInfo({ method: 'get_salts', drugbank_id: 'DB00001' });
+  assert(!result.error, `Got error: ${result.error}`);
+  assert('salt_count' in result, 'Should have salt_count');
+  assert(Array.isArray(result.salts), 'Should return salts array');
+  assert(result.drug_name, 'Should return drug_name');
+});
+
+test('get_salts: salt objects have expected fields', async () => {
+  const result = await handleDrugBankInfo({ method: 'get_salts', drugbank_id: 'DB00001' });
+  if (result.salt_count > 0) {
+    const salt = result.salts[0];
+    assert('name' in salt, 'Salt should have name');
+    assert('unii' in salt, 'Salt should have unii');
+    assert('cas_number' in salt, 'Salt should have cas_number');
+  }
+});
+
+test('get_salts: requires drugbank_id parameter', async () => {
+  const result = await handleDrugBankInfo({ method: 'get_salts' });
+  assert(result.error, 'Should return error without drugbank_id');
+});
+
+// ============================================================
 // Edge cases & Error handling
 // ============================================================
 test('unknown method: returns error with available methods', async () => {
   const result = await handleDrugBankInfo({ method: 'unknown_method' });
   assert(result.error, 'Should return error for unknown method');
   assert(result.available_methods, 'Should list available methods');
-  assert(result.available_methods.length === 13, `Should have 13 methods, got ${result.available_methods.length}`);
+  assert(result.available_methods.length === 16, `Should have 16 methods, got ${result.available_methods.length}`);
 });
 
 test('limit parameter: respects limit', async () => {
