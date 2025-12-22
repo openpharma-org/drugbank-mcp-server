@@ -278,28 +278,7 @@ Once configured, you can ask Claude:
 - **Records**: 17,430 drugs (13,166 small molecules + 4,264 biotech)
 - **Download**: Pre-built databases available in [releases](../../releases)
 
-## Development
-
-```bash
-# Run server in development mode (directly from src/)
-npm run dev
-
-# Build for production
-npm run build
-
-# Run built server
-npm start
-
-# The server uses stdio transport for MCP communication
-# Logs go to stderr, MCP responses go to stdout
-```
-
 ## Troubleshooting
-
-**Server not appearing in Claude Desktop:**
-- Check that the path in `claude_desktop_config.json` is correct
-- Restart Claude Desktop completely
-- Check Claude Desktop logs for errors
 
 **Database not found:**
 - Run `npm run download:db` to download the latest pre-built SQLite database release
