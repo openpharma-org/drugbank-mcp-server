@@ -33,21 +33,6 @@ npm run download:db
 npm run build:code
 ```
 
-### Database Versioning
-
-The database version is tracked in `data/VERSION` and automatically updated monthly:
-- **Current version**: 5.1 (see `data/VERSION`)
-- **Automated updates**: Monthly via GitHub Actions (1st of each month)
-- **Manual updates**: Run `npm run download:db` to get the latest release
-- **GitHub releases**: Each database update creates a new release with the database file
-
-The workflow automatically:
-1. Downloads the latest DrugBank XML
-2. Extracts the version from the XML header
-3. Compares with the tracked version in `data/VERSION`
-4. Only builds and releases if the version changed or release is missing
-5. Updates `data/VERSION` and commits to the repository
-
 ## Usage 
 
 ```json
@@ -55,7 +40,7 @@ The workflow automatically:
   "mcpServers": {
     "drugbank": {
       "command": "node",
-      "args": ["/Users/joan.saez-pons/code/drugbank-mcp-server/build/index.js"]
+      "args": ["/path/to/drugbank-mcp-server/build/index.js"]
     }
   }
 }
@@ -273,39 +258,6 @@ Once configured, you can ask Claude:
 
 **Note**: Use chemical/generic names (acetylsalicylic acid, ibuprofen, acetaminophen) rather than brand names (Aspirin, Advil, Tylenol) for best results.
 
-## Architecture
-
-```
-src/
-├── index.js                    # MCP server (unified tool pattern)
-├── drugbank-api.js             # Business logic (16 methods)
-├── drugbank-parser-sqlite.js   # SQLite query layer (fast)
-└── drugbank-parser.js          # XML fallback parser (slow)
-
-build/                          # Built files (copied from src/)
-├── index.js
-├── drugbank-api.js
-├── drugbank-parser-sqlite.js
-└── drugbank-parser.js
-
-data/                           # Database files
-├── VERSION                     # Tracked version (e.g., "5.1")
-└── drugbank.db                 # SQLite database (31MB, gitignored)
-
-scripts/
-├── build.js                    # Copy src/ to build/
-├── build-db.js                 # Build SQLite from XML (includes half-life parsing)
-├── download-db.js              # Download pre-built database from GitHub releases
-└── migrate-halflife.js         # Migration script for half_life_hours column
-
-.github/workflows/
-└── update-database.yml         # Automated monthly database updates
-```
-
-**Pattern**: Single unified tool with method enum (following who-mcp-server, sec-mcp-server, cdc-mcp-server patterns)
-
-**Database Backend**: Auto-detects SQLite (fast) or falls back to XML parser (slow)
-
 ## Performance
 
 ### SQLite Mode (Default)
@@ -324,8 +276,7 @@ scripts/
 - **Database**: DrugBank (Full Database)
 - **Current version**: 5.1 (see `data/VERSION`)
 - **Records**: 17,430 drugs (13,166 small molecules + 4,264 biotech)
-- **Updates**: Automated monthly via GitHub Actions (1st of each month)
-- **Download**: Pre-built databases available in [GitHub Releases](../../releases)
+- **Download**: Pre-built databases available in [releases](../../releases)
 
 ## Development
 
@@ -351,13 +302,13 @@ npm start
 - Check Claude Desktop logs for errors
 
 **Database not found:**
-- Run `npm run download:db` to download the latest pre-built SQLite database from GitHub releases
+- Run `npm run download:db` to download the latest pre-built SQLite database release
 - Database file should be at `data/drugbank.db`
 - Check current version: `cat data/VERSION`
 
 **Check for database updates:**
 - Current version is tracked in `data/VERSION`
-- Latest releases are available at [GitHub Releases](../../releases)
+- Latest releases are available at [releases](../../releases)
 - Run `npm run download:db` to get the latest version
 - Database is automatically updated monthly (1st of each month)
 
