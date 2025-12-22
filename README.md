@@ -38,7 +38,7 @@ npm run build:code
 ```json
 {
   "mcpServers": {
-    "drugbank": {
+    "drugbank-mcp-server": {
       "command": "node",
       "args": ["/path/to/drugbank-mcp-server/build/index.js"]
     }
