@@ -84,14 +84,19 @@ export async function searchDrugsByIndication(query, limit = 20) {
 export async function searchDrugsByTarget(target, limit = 20) {
   const database = getDb();
 
+  // Normalize the search term: lowercase and replace hyphens with spaces
+  // This matches Open Targets format ("glucagon like peptide 1 receptor")
+  // with DrugBank format ("Glucagon-like peptide 1 receptor")
+  const normalizedTarget = target.toLowerCase().replace(/-/g, ' ');
+
   const stmt = database.prepare(`
     SELECT DISTINCT drugs.* FROM drug_targets
     JOIN drugs ON drug_targets.drug_id = drugs.drugbank_id
-    WHERE drug_targets.target_name LIKE ?
+    WHERE LOWER(REPLACE(drug_targets.target_name, '-', ' ')) LIKE ?
     LIMIT ?
   `);
 
-  const drugs = stmt.all(`%${target}%`, limit);
+  const drugs = stmt.all(`%${normalizedTarget}%`, limit);
   return drugs.map(drug => extractDrugSummary(parseDrugRow(drug)));
 }
 
