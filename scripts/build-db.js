@@ -311,7 +311,7 @@ function extractExternalIdentifiers(drug) {
 function extractDrugInteractions(drug) {
   const interactions = drug['drug-interactions']?.['drug-interaction'] || [];
   const intArray = extractArray(interactions);
-  return intArray.slice(0, 100).map(int => ({
+  return intArray.map(int => ({
     drugbank_id: int['drugbank-id'] || null,
     name: int.name || null,
     description: int.description || null
@@ -326,7 +326,7 @@ function extractFoodInteractions(drug) {
 function extractTargets(drug) {
   const targets = drug.targets?.target || [];
   const targetArray = extractArray(targets);
-  return targetArray.slice(0, 50).map(t => ({
+  return targetArray.map(t => ({
     id: t.id || null,
     name: t.name || null,
     organism: t.organism || null,
@@ -337,7 +337,7 @@ function extractTargets(drug) {
 function extractEnzymes(drug) {
   const enzymes = drug.enzymes?.enzyme || [];
   const enzymeArray = extractArray(enzymes);
-  return enzymeArray.slice(0, 50).map(e => ({
+  return enzymeArray.map(e => ({
     id: e.id || null,
     name: e.name || null,
     organism: e.organism || null
@@ -347,7 +347,7 @@ function extractEnzymes(drug) {
 function extractCarriers(drug) {
   const carriers = drug.carriers?.carrier || [];
   const carrierArray = extractArray(carriers);
-  return carrierArray.slice(0, 50).map(c => ({
+  return carrierArray.map(c => ({
     id: c.id || null,
     name: c.name || null,
     organism: c.organism || null,
@@ -358,7 +358,7 @@ function extractCarriers(drug) {
 function extractTransporters(drug) {
   const transporters = drug.transporters?.transporter || [];
   const transporterArray = extractArray(transporters);
-  return transporterArray.slice(0, 50).map(t => ({
+  return transporterArray.map(t => ({
     id: t.id || null,
     name: t.name || null,
     organism: t.organism || null,
@@ -409,7 +409,7 @@ function extractPathways(drug) {
 function extractProducts(drug) {
   const products = drug.products?.product || [];
   const productArray = extractArray(products);
-  return productArray.slice(0, 100).map(p => ({
+  return productArray.map(p => ({
     name: p.name || null,
     labeller: p.labeller || null,
     country: p.country || null,
@@ -448,9 +448,9 @@ function parseHalfLifeToHours(halfLifeText) {
   // Common patterns to extract numeric values with units
   const patterns = [
     // Range with hyphen: "4-5 hours", "11-12 min"
-    /(\d+(?:\.\d+)?)\s*[-–to]+\s*(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|min|days?|d|weeks?|wks?|w)/i,
-    // With ± or plus/minus: "25 ± 10 hours"
-    /(\d+(?:\.\d+)?)\s*[±\+\-\/]\s*(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|min|days?|d|weeks?|wks?|w)/i,
+    /(\d+(?:\.\d+)?)\s*[-\u2013to]+\s*(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|min|days?|d|weeks?|wks?|w)/i,
+    // With \u00b1 or plus/minus: "25 \u00b1 10 hours"
+    /(\d+(?:\.\d+)?)\s*[\u00b1\+\-\/]\s*(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|min|days?|d|weeks?|wks?|w)/i,
     // Simple value with unit: "1.3 hours", "10 minutes"
     /(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|min|days?|d|weeks?|wks?|w)/i,
     // Approximate: "approximately 10 minutes"
@@ -464,7 +464,7 @@ function parseHalfLifeToHours(halfLifeText) {
       let unit = match[match.length - 1]; // Last capture group is always unit
 
       if (match.length === 4) {
-        // Range or ±: take average
+        // Range or \u00b1: take average
         const val1 = parseFloat(match[1]);
         const val2 = parseFloat(match[2]);
         value = (val1 + val2) / 2;
@@ -606,7 +606,7 @@ xml.on('end', function() {
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
   const size = (fs.statSync(DB_FILE).size / (1024 * 1024)).toFixed(1);
 
-  console.log(`[DB Builder] ✓ Database built successfully!`);
+  console.log(`[DB Builder] \u2713 Database built successfully!`);
   console.log(`[DB Builder] Time: ${duration}s`);
   console.log(`[DB Builder] Size: ${size}MB`);
   console.log(`[DB Builder] Location: ${DB_FILE}`);
