@@ -1,0 +1,208 @@
+name: Update DrugBank Database
+
+on:
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      drugbank_url:
+        description: 'DrugBank XML download URL (optional override)'
+        required: false
+
+permissions:
+  contents: write  # Allow pushing commits and creating releases
+
+jobs:
+  build-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download and check DrugBank version
+        id: check_version
+        env:
+          DRUGBANK_USERNAME: ${{ secrets.DRUGBANK_USERNAME }}
+          DRUGBANK_PASSWORD: ${{ secrets.DRUGBANK_PASSWORD }}
+          DRUGBANK_URL: ${{ inputs.drugbank_url || 'https://go.drugbank.com/releases/latest/downloads/all-full-database' }}
+        run: |
+          echo "Downloading DrugBank database..."
+
+          # Create data directory
+          mkdir -p data
+
+          # Download full ZIP file
+          curl -Lf -o data/drugbank-full-database.zip \
+            -u "$DRUGBANK_USERNAME:$DRUGBANK_PASSWORD" \
+            "$DRUGBANK_URL"
+
+          echo "Download complete: $(du -h data/drugbank-full-database.zip | cut -f1)"
+
+          # Extract only first 5KB of XML to get version (no need to extract full file yet)
+          unzip -p data/drugbank-full-database.zip 2>/dev/null | head -c 5000 > data/header.xml
+          VERSION=$(grep -E '<drugbank [^>]*version=' data/header.xml | sed -n 's/.*version="\([^"]*\)".*/\1/p' | head -1)
+
+          if [ -z "$VERSION" ]; then
+            echo "Error: Failed to extract version from database"
+            exit 1
+          fi
+
+          echo "DrugBank version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          # Cleanup temporary file
+          rm -f data/header.xml
+
+      - name: Check if database changed
+        id: check_changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEW_VERSION="${{ steps.check_version.outputs.version }}"
+          TODAY=$(date +'%Y-%m-%d')
+
+          # Check if VERSION file exists and matches
+          if [ -f "data/VERSION" ]; then
+            CURRENT_VERSION=$(cat data/VERSION | tr -d '[:space:]')
+            echo "Current VERSION file: $CURRENT_VERSION"
+          else
+            CURRENT_VERSION=""
+            echo "No VERSION file found"
+          fi
+
+          echo "New version from DrugBank: $NEW_VERSION"
+          echo "Today's date: $TODAY"
+
+          # Primary check: VERSION file
+          if [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
+            echo "Version unchanged ($NEW_VERSION) - checking if release exists..."
+
+            # Secondary check: Does today's release exist?
+            if gh release view "db-$TODAY" &>/dev/null; then
+              echo "Release db-$TODAY already exists - skipping build"
+              echo "should_process=false" >> $GITHUB_OUTPUT
+            else
+              echo "Release missing for today - will build"
+              echo "should_process=true" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "Version changed ($CURRENT_VERSION → $NEW_VERSION) - will build"
+            echo "should_process=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract DrugBank XML
+        if: steps.check_changes.outputs.should_process == 'true'
+        run: |
+          echo "Extracting XML from ZIP..."
+
+          # Extract XML into data directory
+          cd data
+          unzip -o drugbank-full-database.zip
+          cd ..
+
+          # Verify file exists
+          if [ ! -f "data/full database.xml" ]; then
+            echo "Error: XML file not found after extraction"
+            exit 1
+          fi
+
+          echo "Extracted $(du -h 'data/full database.xml' | cut -f1) XML file"
+
+      - name: Build SQLite Database
+        if: steps.check_changes.outputs.should_process == 'true'
+        run: |
+          echo "Building SQLite database from XML..."
+          node --max-old-space-size=2048 scripts/build-db.js
+
+          # Verify database was created
+          if [ ! -f "data/drugbank.db" ]; then
+            echo "Error: Database build failed"
+            exit 1
+          fi
+
+          echo "Database built successfully: $(du -h data/drugbank.db | cut -f1)"
+
+          # Run quick validation
+          sqlite3 data/drugbank.db "SELECT COUNT(*) FROM drugs;" > drug_count.txt
+          DRUG_COUNT=$(cat drug_count.txt)
+          echo "Total drugs in database: $DRUG_COUNT"
+
+          if [ "$DRUG_COUNT" -lt 15000 ]; then
+            echo "Error: Drug count too low ($DRUG_COUNT), expected >15000"
+            exit 1
+          fi
+
+      - name: Get current date for release
+        id: date
+        if: steps.check_changes.outputs.should_process == 'true'
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Create Release with Database
+        if: steps.check_changes.outputs.should_process == 'true'
+        run: |
+          DRUG_COUNT=$(cat drug_count.txt)
+          DB_SIZE=$(du -h data/drugbank.db | cut -f1)
+
+          gh release create "db-${{ steps.date.outputs.date }}" \
+            --title "DrugBank Database ${{ steps.date.outputs.date }}" \
+            --notes "## DrugBank Database Update
+
+          **Version**: ${{ steps.check_version.outputs.version }}
+          **Date**: ${{ steps.date.outputs.date }}
+          **Total Drugs**: $DRUG_COUNT
+          **Database Size**: $DB_SIZE
+
+          ### Usage
+          Download \`drugbank.db\` and place it in your project's \`data/\` folder:
+          \`\`\`bash
+          mkdir -p data
+          wget -O data/drugbank.db https://github.com/${{ github.repository }}/releases/download/db-${{ steps.date.outputs.date }}/drugbank.db
+          \`\`\`
+
+          ### What's Included
+          - All FDA-approved, investigational, and experimental drugs
+          - Drug interactions, targets, pathways, and products
+          - Optimized SQLite database with FTS5 search
+          - Query performance: <10ms
+
+          🤖 *Automated build from DrugBank XML source*" \
+            data/drugbank.db
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update VERSION file
+        if: steps.check_changes.outputs.should_process == 'true'
+        run: |
+          echo "${{ steps.check_version.outputs.version }}" > data/VERSION
+          echo "Updated VERSION file to ${{ steps.check_version.outputs.version }}"
+
+      - name: Commit VERSION file
+        if: steps.check_changes.outputs.should_process == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/VERSION
+
+          # Only commit if there are changes
+          if git diff --staged --quiet; then
+            echo "VERSION file unchanged, skipping commit"
+          else
+            git commit -m "Update DrugBank version to ${{ steps.check_version.outputs.version }}"
+            git push
+          fi
+
+      - name: Cleanup large files
+        if: always()
+        run: |
+          rm -f data/*.db data/*.db-shm data/*.db-wal data/*.xml data/*.zip
+          echo "Cleaned up large files, kept VERSION"
